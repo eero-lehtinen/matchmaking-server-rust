@@ -77,7 +77,7 @@ async fn create_game(
     State(state): State<Arc<Mutex<Games>>>,
     extract::Json(payload): extract::Json<CreateGameRequest>,
 ) -> Result<Json<CreateGameResponse>, (StatusCode, &'static str)> {
-    debug!("Client IP: {:?}", client_ip);
+    trace!("Client IP: {:?}", client_ip);
     if client_ip.0 != payload.external_address.ip() {
         debug!(
             "IPs {:?} and {:?} don't match",
@@ -125,7 +125,7 @@ async fn join_game(
     Path(token): Path<String>,
     extract::Json(payload): extract::Json<JoinGameRequest>,
 ) -> Result<Json<JoinGameResponse>, (StatusCode, &'static str)> {
-    debug!("Client IP: {:?}", client_ip);
+    trace!("Client IP: {:?}", client_ip);
     if client_ip.0 != payload.external_address.ip() {
         debug!(
             "IPs {:?} and {:?} don't match",
@@ -167,7 +167,7 @@ async fn heartbeat(
         .get_mut(&token)
         .ok_or((StatusCode::NOT_FOUND, "Game not found"))?;
 
-    debug!("Client IP: {:?}", client_ip);
+    trace!("Client IP: {:?}", client_ip);
     if client_ip.0 != game.external_address.ip() {
         debug!(
             "IPs {:?} and {:?} don't match",
