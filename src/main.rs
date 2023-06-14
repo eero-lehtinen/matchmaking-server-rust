@@ -27,6 +27,7 @@ struct Game {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     tracing_subscriber::fmt()
+        .with_env_filter("tower_http=debug")
         .with_target(false)
         .compact()
         .init();
