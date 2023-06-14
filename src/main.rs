@@ -12,7 +12,7 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tower_http::trace::TraceLayer;
-use tracing::{debug, info};
+use tracing::log::*;
 
 #[derive(Debug, Default)]
 struct Games(HashMap<String, Game>);
@@ -27,7 +27,7 @@ struct Game {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     tracing_subscriber::fmt()
-        .with_env_filter("tower_http=debug")
+        .with_env_filter("matchmaking_server_rust=debug,tower_http=debug")
         .with_target(false)
         .compact()
         .init();
@@ -44,7 +44,7 @@ async fn main() {
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
-    println!("Starting server");
+    info!("Starting server");
 
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
@@ -116,6 +116,10 @@ async fn join_game(
     extract::Json(payload): extract::Json<JoinGameRequest>,
 ) -> Result<Json<JoinGameResponse>, (StatusCode, &'static str)> {
     if addr.ip() != payload.external_address.ip() {
+        debug!(
+            "IPs {:?} and {:?} don't match",
+            addr, payload.external_address
+        );
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
@@ -153,6 +157,7 @@ async fn heartbeat(
         .ok_or((StatusCode::NOT_FOUND, "Game not found"))?;
 
     if addr.ip() != game.external_address.ip() {
+        debug!("IPs {:?} and {:?} don't match", addr, game.external_address);
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
