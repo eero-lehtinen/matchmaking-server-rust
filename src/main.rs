@@ -44,6 +44,8 @@ async fn main() {
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
+    println!("Starting server");
+
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await
