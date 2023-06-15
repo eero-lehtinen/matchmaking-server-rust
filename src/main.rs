@@ -77,9 +77,8 @@ async fn create_game(
     State(state): State<Arc<Mutex<Games>>>,
     extract::Json(payload): extract::Json<CreateGameRequest>,
 ) -> Result<Json<CreateGameResponse>, (StatusCode, &'static str)> {
-    trace!("Client IP: {:?}", client_ip);
     if client_ip.0 != payload.external_address.ip() {
-        debug!(
+        info!(
             "IPs {:?} and {:?} don't match",
             client_ip.0, payload.external_address
         );
