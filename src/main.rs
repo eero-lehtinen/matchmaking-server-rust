@@ -1,4 +1,9 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use axum::{
     debug_handler,
@@ -11,7 +16,6 @@ use axum_client_ip::{SecureClientIp, SecureClientIpSource};
 use base64::prelude::*;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 use tower_http::trace::TraceLayer;
 use tracing::log::*;
 
@@ -88,7 +92,7 @@ async fn create_game(
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
-    let mut games = state.lock().await;
+    let mut games = state.lock().expect("lock not poisoned");
 
     let mut random_data = [0u8; 7];
     let token = loop {
@@ -135,7 +139,7 @@ async fn join_game(
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
-    let mut games = state.lock().await;
+    let mut games = state.lock().expect("lock not poisoned");
 
     let game = games
         .0
@@ -161,7 +165,7 @@ async fn heartbeat(
     State(state): State<Arc<Mutex<Games>>>,
     Path(token): Path<String>,
 ) -> Result<Json<HeartbeatResponse>, (StatusCode, &'static str)> {
-    let mut games = state.lock().await;
+    let mut games = state.lock().expect("lock not poisoned");
 
     let game = games
         .0
@@ -205,7 +209,7 @@ async fn cleanup(state: Arc<Mutex<Games>>) {
     loop {
         interval.tick().await;
 
-        let mut games = state.lock().await;
+        let mut games = state.lock().expect("lock not poisoned");
 
         let now = unix_time();
 
