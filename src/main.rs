@@ -35,7 +35,6 @@ async fn main() {
     let config: Config = envy::from_env().unwrap();
 
     tracing_subscriber::fmt()
-        .with_env_filter("matchmaking_server_rust=debug,tower_http=debug")
         .with_target(false)
         .compact()
         .without_time()
@@ -126,9 +125,8 @@ async fn join_game(
     Path(token): Path<String>,
     extract::Json(payload): extract::Json<JoinGameRequest>,
 ) -> Result<Json<JoinGameResponse>, (StatusCode, &'static str)> {
-    trace!("Client IP: {:?}", client_ip);
     if client_ip.0 != payload.external_address.ip() {
-        debug!(
+        info!(
             "IPs {:?} and {:?} don't match",
             client_ip, payload.external_address
         );
@@ -168,9 +166,8 @@ async fn heartbeat(
         .get_mut(&token)
         .ok_or((StatusCode::NOT_FOUND, "Game not found"))?;
 
-    trace!("Client IP: {:?}", client_ip);
     if client_ip.0 != game.external_address.ip() {
-        debug!(
+        info!(
             "IPs {:?} and {:?} don't match",
             client_ip, game.external_address
         );
@@ -212,13 +209,11 @@ async fn cleanup(state: Arc<Mutex<Games>>) {
 
         games.0.retain(|_, game| {
             if now - game.timestamp > GAME_STALE {
-                trace!("Game {:?} is stale", game);
                 return false;
             }
 
-            game.clients_to_join.retain(|addr, timestamp| {
+            game.clients_to_join.retain(|_, timestamp| {
                 if now - *timestamp > CLIENT_JOIN_STALE {
-                    trace!("Client {} is stale", addr);
                     return false;
                 }
 
