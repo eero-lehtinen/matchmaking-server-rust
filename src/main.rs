@@ -30,7 +30,7 @@ struct Config {
     ip_source: SecureClientIpSource,
 }
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() {
     let config: Config = envy::from_env().unwrap();
 
