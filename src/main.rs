@@ -20,7 +20,24 @@ use tower_http::trace::TraceLayer;
 use tracing::log::*;
 
 #[derive(Debug, Default)]
-struct Games(HashMap<String, Game>);
+struct MyState {
+    games: HashMap<String, Game>,
+}
+
+impl MyState {
+    fn get_game_mut(&mut self, token: &str) -> Option<&mut Game> {
+        let now = unix_time();
+        self.games
+            .get_mut(token)
+            .filter(|game| now - game.timestamp <= GAME_STALE)
+    }
+
+    fn cleanup(&mut self) {
+        let now = unix_time();
+        self.games
+            .retain(|_, game| now - game.timestamp <= GAME_STALE);
+    }
+}
 
 #[derive(Debug)]
 struct Game {
@@ -47,7 +64,7 @@ async fn main() {
         .without_time()
         .init();
 
-    let state = Arc::new(Mutex::new(Games::default()));
+    let state = Arc::new(Mutex::new(MyState::default()));
 
     let task_state = state.clone();
     tokio::task::spawn(async { cleanup(task_state).await });
@@ -81,7 +98,7 @@ struct CreateGameResponse {
 #[debug_handler]
 async fn create_game(
     client_ip: SecureClientIp,
-    State(state): State<Arc<Mutex<Games>>>,
+    State(state): State<Arc<Mutex<MyState>>>,
     extract::Json(payload): extract::Json<CreateGameRequest>,
 ) -> Result<Json<CreateGameResponse>, (StatusCode, &'static str)> {
     if client_ip.0 != payload.external_address.ip() {
@@ -92,13 +109,13 @@ async fn create_game(
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
-    let mut games = state.lock().expect("lock not poisoned");
+    let mut state = state.lock().expect("lock not poisoned");
 
     let mut random_data = [0u8; 7];
     let token = loop {
         rand::thread_rng().fill_bytes(&mut random_data);
         let token = BASE64_URL_SAFE_NO_PAD.encode(random_data);
-        if !games.0.contains_key(&token) {
+        if !state.games.contains_key(&token) {
             break token;
         }
     };
@@ -108,7 +125,7 @@ async fn create_game(
         external_address: payload.external_address,
         clients_to_join: HashMap::new(),
     };
-    games.0.insert(token.clone(), game);
+    state.games.insert(token.clone(), game);
 
     Ok(Json(CreateGameResponse { token }))
 }
@@ -127,7 +144,7 @@ struct JoinGameResponse {
 #[debug_handler]
 async fn join_game(
     client_ip: SecureClientIp,
-    State(state): State<Arc<Mutex<Games>>>,
+    State(state): State<Arc<Mutex<MyState>>>,
     Path(token): Path<String>,
     extract::Json(payload): extract::Json<JoinGameRequest>,
 ) -> Result<Json<JoinGameResponse>, (StatusCode, &'static str)> {
@@ -139,11 +156,10 @@ async fn join_game(
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
-    let mut games = state.lock().expect("lock not poisoned");
+    let mut state = state.lock().expect("lock not poisoned");
 
-    let game = games
-        .0
-        .get_mut(&token)
+    let game = state
+        .get_game_mut(&token)
         .ok_or((StatusCode::NOT_FOUND, "Game not found"))?;
 
     game.clients_to_join
@@ -162,14 +178,13 @@ struct HeartbeatResponse {
 #[debug_handler]
 async fn heartbeat(
     client_ip: SecureClientIp,
-    State(state): State<Arc<Mutex<Games>>>,
+    State(state): State<Arc<Mutex<MyState>>>,
     Path(token): Path<String>,
 ) -> Result<Json<HeartbeatResponse>, (StatusCode, &'static str)> {
-    let mut games = state.lock().expect("lock not poisoned");
+    let mut state = state.lock().expect("lock not poisoned");
 
-    let game = games
-        .0
-        .get_mut(&token)
+    let game = state
+        .get_game_mut(&token)
         .ok_or((StatusCode::NOT_FOUND, "Game not found"))?;
 
     if client_ip.0 != game.external_address.ip() {
@@ -181,7 +196,10 @@ async fn heartbeat(
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
-    game.timestamp = unix_time();
+    let now = unix_time();
+    game.timestamp = now;
+    game.clients_to_join
+        .retain(|_, timestamp| now - *timestamp <= CLIENT_JOIN_STALE);
 
     let clients = game.clients_to_join.keys().copied().collect();
 
@@ -194,8 +212,8 @@ const CLIENT_JOIN_STALE: u64 = 10_000;
 // 1 minute
 const GAME_STALE: u64 = 60_000;
 
-// 2 seconds
-const CLEANUP_INTERVAL: u64 = 2_000;
+// 6 hours
+const CLEANUP_INTERVAL: u64 = 6 * 60 * 60 * 1000;
 
 fn unix_time() -> u64 {
     std::time::SystemTime::now()
@@ -204,29 +222,10 @@ fn unix_time() -> u64 {
         .as_millis() as u64
 }
 
-async fn cleanup(state: Arc<Mutex<Games>>) {
+async fn cleanup(state: Arc<Mutex<MyState>>) {
     let mut interval = tokio::time::interval(Duration::from_millis(CLEANUP_INTERVAL));
     loop {
         interval.tick().await;
-
-        let mut games = state.lock().expect("lock not poisoned");
-
-        let now = unix_time();
-
-        games.0.retain(|_, game| {
-            if now - game.timestamp > GAME_STALE {
-                return false;
-            }
-
-            game.clients_to_join.retain(|_, timestamp| {
-                if now - *timestamp > CLIENT_JOIN_STALE {
-                    return false;
-                }
-
-                true
-            });
-
-            true
-        });
+        state.lock().expect("lock not poisoned").cleanup();
     }
 }
