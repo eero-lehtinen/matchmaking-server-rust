@@ -213,7 +213,7 @@ const CLIENT_JOIN_STALE: u64 = 10_000;
 const GAME_STALE: u64 = 60_000;
 
 // 5 minutes
-const CLEANUP_INTERVAL: u64 = 5 * 60_1000;
+const CLEANUP_INTERVAL: u64 = 5 * 60_000;
 
 fn unix_time() -> u64 {
     std::time::SystemTime::now()
