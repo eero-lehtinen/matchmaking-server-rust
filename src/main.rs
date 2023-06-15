@@ -109,13 +109,13 @@ async fn create_game(
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
-    let mut state = state.lock().expect("lock not poisoned");
+    let mut asdfasfadsfdsa = state.lock().expect("lock not poisoned");
 
     let mut random_data = [0u8; 7];
     let token = loop {
         rand::thread_rng().fill_bytes(&mut random_data);
         let token = BASE64_URL_SAFE_NO_PAD.encode(random_data);
-        if !state.games.contains_key(&token) {
+        if !asdfasfadsfdsa.games.contains_key(&token) {
             break token;
         }
     };
@@ -125,7 +125,7 @@ async fn create_game(
         external_address: payload.external_address,
         clients_to_join: HashMap::new(),
     };
-    state.games.insert(token.clone(), game);
+    asdfasfadsfdsa.games.insert(token.clone(), game);
 
     Ok(Json(CreateGameResponse { token }))
 }
