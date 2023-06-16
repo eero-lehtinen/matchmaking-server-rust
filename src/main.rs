@@ -12,7 +12,7 @@ use axum::{
     routing::post,
     Json, Router,
 };
-use axum_client_ip::{SecureClientIp, SecureClientIpSource};
+use axum_client_ip::{CfConnectingIp, SecureClientIp, SecureClientIpSource, XForwardedFor};
 use base64::prelude::*;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -99,8 +99,12 @@ struct CreateGameResponse {
 async fn create_game(
     client_ip: SecureClientIp,
     State(state): State<Arc<Mutex<MyState>>>,
+    cf: CfConnectingIp,
+    xf: XForwardedFor,
     extract::Json(payload): extract::Json<CreateGameRequest>,
 ) -> Result<Json<CreateGameResponse>, (StatusCode, &'static str)> {
+    info!("cf: {:?}", cf);
+    info!("xf: {:?}", xf);
     if client_ip.0 != payload.external_address.ip() {
         info!(
             "IPs {:?} and {:?} don't match",
