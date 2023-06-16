@@ -17,5 +17,5 @@ RUN cargo build --release
 FROM debian:buster-slim AS runtime
 WORKDIR /app
 COPY --from=builder /app/target/release/matchmaking-server-rust /usr/local/bin
-ENV IP_SOURCE=RightmostXForwardedFor
+ENV IP_SOURCE=CfConnectingIp
 ENTRYPOINT ["/usr/local/bin/matchmaking-server-rust"]
