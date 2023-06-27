@@ -9,6 +9,7 @@ edition = "2021"
 axum = { version = "0.6.18", features = ["macros"] }
 axum-client-ip = "0.4.1"
 base64 = "0.21.2"
+dashmap = "5.4.0"
 envy = "0.4.2"
 rand = "0.8.5"
 serde = { version = "1.0.164", features = ["derive"] }

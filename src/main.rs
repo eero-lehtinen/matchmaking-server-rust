@@ -1,9 +1,4 @@
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{
     debug_handler,
@@ -12,27 +7,28 @@ use axum::{
     routing::post,
     Json, Router,
 };
-use axum_client_ip::{CfConnectingIp, SecureClientIp, SecureClientIpSource, XForwardedFor};
+use axum_client_ip::{SecureClientIp, SecureClientIpSource};
 use base64::prelude::*;
+use dashmap::{mapref::one::RefMut, DashMap};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tower_http::trace::TraceLayer;
 use tracing::log::*;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct MyState {
-    games: HashMap<String, Game>,
+    games: Arc<DashMap<String, Game>>,
 }
 
 impl MyState {
-    fn get_game_mut(&mut self, token: &str) -> Option<&mut Game> {
+    fn get_game_mut(&self, token: &str) -> Option<RefMut<String, Game>> {
         let now = unix_time();
         self.games
             .get_mut(token)
             .filter(|game| now - game.timestamp <= GAME_STALE)
     }
 
-    fn cleanup(&mut self) {
+    fn cleanup(&self) {
         let now = unix_time();
         self.games
             .retain(|_, game| now - game.timestamp <= GAME_STALE);
@@ -58,13 +54,13 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "matchmaking_server_rust=info,tower_http=debug".into()),
+                .unwrap_or_else(|_| "matchmaking_server_rust=info,tower_http=info".into()),
         )
         .compact()
         .without_time()
         .init();
 
-    let state = Arc::new(Mutex::new(MyState::default()));
+    let state = MyState::default();
 
     let task_state = state.clone();
     tokio::task::spawn(async { cleanup(task_state).await });
@@ -98,7 +94,7 @@ struct CreateGameResponse {
 #[debug_handler]
 async fn create_game(
     client_ip: SecureClientIp,
-    State(state): State<Arc<Mutex<MyState>>>,
+    State(state): State<MyState>,
     extract::Json(payload): extract::Json<CreateGameRequest>,
 ) -> Result<Json<CreateGameResponse>, (StatusCode, &'static str)> {
     if client_ip.0 != payload.external_address.ip() {
@@ -108,8 +104,6 @@ async fn create_game(
         );
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
-
-    let mut state = state.lock().expect("lock not poisoned");
 
     let mut random_data = [0u8; 7];
     let token = loop {
@@ -144,7 +138,7 @@ struct JoinGameResponse {
 #[debug_handler]
 async fn join_game(
     client_ip: SecureClientIp,
-    State(state): State<Arc<Mutex<MyState>>>,
+    State(state): State<MyState>,
     Path(token): Path<String>,
     extract::Json(payload): extract::Json<JoinGameRequest>,
 ) -> Result<Json<JoinGameResponse>, (StatusCode, &'static str)> {
@@ -156,9 +150,7 @@ async fn join_game(
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
-    let mut state = state.lock().expect("lock not poisoned");
-
-    let game = state
+    let mut game = state
         .get_game_mut(&token)
         .ok_or((StatusCode::NOT_FOUND, "Game not found"))?;
 
@@ -178,12 +170,10 @@ struct HeartbeatResponse {
 #[debug_handler]
 async fn heartbeat(
     client_ip: SecureClientIp,
-    State(state): State<Arc<Mutex<MyState>>>,
+    State(state): State<MyState>,
     Path(token): Path<String>,
 ) -> Result<Json<HeartbeatResponse>, (StatusCode, &'static str)> {
-    let mut state = state.lock().expect("lock not poisoned");
-
-    let game = state
+    let mut game = state
         .get_game_mut(&token)
         .ok_or((StatusCode::NOT_FOUND, "Game not found"))?;
 
@@ -222,10 +212,10 @@ fn unix_time() -> u64 {
         .as_millis() as u64
 }
 
-async fn cleanup(state: Arc<Mutex<MyState>>) {
+async fn cleanup(state: MyState) {
     let mut interval = tokio::time::interval(Duration::from_millis(CLEANUP_INTERVAL));
     loop {
         interval.tick().await;
-        state.lock().expect("lock not poisoned").cleanup();
+        state.cleanup();
     }
 }
