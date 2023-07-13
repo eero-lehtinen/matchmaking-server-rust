@@ -12,7 +12,6 @@ use base64::prelude::*;
 use dashmap::{mapref::one::RefMut, DashMap};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use tower_http::trace::TraceLayer;
 use tracing::log::*;
 
 #[derive(Debug, Default, Clone)]
@@ -54,7 +53,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "matchmaking_server_rust=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "matchmaking_server_rust=info".into()),
         )
         .compact()
         .without_time()
@@ -70,7 +69,6 @@ async fn main() {
         .route("/game/:token/join", post(join_game))
         .route("/game/:token/heartbeat", post(heartbeat))
         .with_state(state)
-        .layer(TraceLayer::new_for_http())
         .layer(config.ip_source.into_extension());
 
     info!("Starting server");
