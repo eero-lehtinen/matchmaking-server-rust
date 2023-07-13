@@ -1,4 +1,12 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use axum::{
     debug_handler,
@@ -14,9 +22,10 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tracing::log::*;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 struct MyState {
-    games: Arc<DashMap<String, Game>>,
+    games: DashMap<String, Game>,
+    total_games_created: AtomicU64,
 }
 
 impl MyState {
@@ -59,7 +68,7 @@ async fn main() {
         .without_time()
         .init();
 
-    let state = MyState::default();
+    let state = Arc::new(MyState::default());
 
     let task_state = state.clone();
     tokio::task::spawn(async { cleanup(task_state).await });
@@ -92,7 +101,7 @@ struct CreateGameResponse {
 #[debug_handler]
 async fn create_game(
     client_ip: SecureClientIp,
-    State(state): State<MyState>,
+    State(state): State<Arc<MyState>>,
     extract::Json(payload): extract::Json<CreateGameRequest>,
 ) -> Result<Json<CreateGameResponse>, (StatusCode, &'static str)> {
     if client_ip.0 != payload.external_address.ip() {
@@ -118,6 +127,7 @@ async fn create_game(
         clients_to_join: HashMap::new(),
     };
     state.games.insert(token.clone(), game);
+    state.total_games_created.fetch_add(1, Ordering::Relaxed);
 
     Ok(Json(CreateGameResponse { token }))
 }
@@ -136,7 +146,7 @@ struct JoinGameResponse {
 #[debug_handler]
 async fn join_game(
     client_ip: SecureClientIp,
-    State(state): State<MyState>,
+    State(state): State<Arc<MyState>>,
     Path(token): Path<String>,
     extract::Json(payload): extract::Json<JoinGameRequest>,
 ) -> Result<Json<JoinGameResponse>, (StatusCode, &'static str)> {
@@ -168,7 +178,7 @@ struct HeartbeatResponse {
 #[debug_handler]
 async fn heartbeat(
     client_ip: SecureClientIp,
-    State(state): State<MyState>,
+    State(state): State<Arc<MyState>>,
     Path(token): Path<String>,
 ) -> Result<Json<HeartbeatResponse>, (StatusCode, &'static str)> {
     let mut game = state
@@ -210,10 +220,20 @@ fn unix_time() -> u64 {
         .as_millis() as u64
 }
 
-async fn cleanup(state: MyState) {
+async fn cleanup(state: Arc<MyState>) {
     let mut interval = tokio::time::interval(Duration::from_millis(CLEANUP_INTERVAL));
+    let mut last_total_games_created = 0;
     loop {
         interval.tick().await;
         state.cleanup();
+        let diff_games_created =
+            state.total_games_created.load(Ordering::Relaxed) - last_total_games_created;
+        if diff_games_created > 0 {
+            last_total_games_created += diff_games_created;
+            info!(
+                "Total games created: {}, in the last 5 mins: {}",
+                last_total_games_created, diff_games_created
+            );
+        }
     }
 }
