@@ -8,10 +8,9 @@ edition = "2021"
 [dependencies]
 axum = { version = "0.6.18", features = ["macros"] }
 axum-client-ip = "0.4.1"
-base64 = "0.21.2"
 dashmap = "5.4.0"
 envy = "0.4.2"
-rand = "0.8.5"
+nanoid = "0.4.0"
 serde = { version = "1.0.164", features = ["derive"] }
 serde_json = "1.0.96"
 tokio = { version = "1.28.2", features = ["full"] }

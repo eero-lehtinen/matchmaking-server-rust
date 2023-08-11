@@ -16,9 +16,8 @@ use axum::{
     Json, Router,
 };
 use axum_client_ip::{SecureClientIp, SecureClientIpSource};
-use base64::prelude::*;
 use dashmap::{mapref::one::RefMut, DashMap};
-use rand::RngCore;
+use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
 use tracing::log::*;
 
@@ -112,10 +111,8 @@ async fn create_game(
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
-    let mut random_data = [0u8; 7];
     let token = loop {
-        rand::thread_rng().fill_bytes(&mut random_data);
-        let token = BASE64_URL_SAFE_NO_PAD.encode(random_data);
+        let token = nanoid!(10);
         if !state.games.contains_key(&token) {
             break token;
         }
