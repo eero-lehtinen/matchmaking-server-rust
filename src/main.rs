@@ -21,6 +21,11 @@ use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
 use tracing::log::*;
 
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 #[derive(Debug, Default)]
 struct MyState {
     games: DashMap<String, Game>,
@@ -50,7 +55,7 @@ struct Game {
     clients_to_join: HashMap<SocketAddr, u64>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 struct Config {
     ip_source: SecureClientIpSource,
     port: Option<u16>,
