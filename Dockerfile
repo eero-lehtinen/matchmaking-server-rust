@@ -14,7 +14,7 @@ COPY . .
 RUN cargo build --release
 
 # We do not need the Rust toolchain to run the binary!
-FROM debian:buster-slim AS runtime
+FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 COPY --from=builder /app/target/release/matchmaking-server-rust /usr/local/bin
 ENV IP_SOURCE=CfConnectingIp
