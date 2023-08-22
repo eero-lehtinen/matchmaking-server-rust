@@ -46,6 +46,7 @@ impl MyState {
 struct Game {
     timestamp: u64,
     external_address: SocketAddr,
+    local_address: SocketAddr,
     clients_to_join: HashMap<SocketAddr, u64>,
 }
 
@@ -94,6 +95,7 @@ async fn main() {
 #[derive(Deserialize)]
 struct CreateGameRequest {
     external_address: SocketAddr,
+    local_address: SocketAddr,
 }
 
 #[derive(Serialize)]
@@ -125,6 +127,7 @@ async fn create_game(
     let game = Game {
         timestamp: unix_time(),
         external_address: payload.external_address,
+        local_address: payload.local_address,
         clients_to_join: HashMap::new(),
     };
     state.games.insert(token.clone(), game);
@@ -140,7 +143,6 @@ struct JoinGameRequest {
 
 #[derive(Serialize)]
 struct JoinGameResponse {
-    /// The address of the game server.
     join: SocketAddr,
 }
 
@@ -162,6 +164,12 @@ async fn join_game(
     let mut game = state
         .get_game_mut(&token)
         .ok_or((StatusCode::NOT_FOUND, "Game not found"))?;
+
+    if payload.external_address.ip() == game.external_address.ip() {
+        return Ok(Json(JoinGameResponse {
+            join: game.local_address,
+        }));
+    }
 
     game.clients_to_join
         .insert(payload.external_address, unix_time());
