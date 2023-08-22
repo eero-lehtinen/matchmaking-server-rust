@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    net::SocketAddr,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -52,6 +52,7 @@ struct Game {
 #[derive(serde::Deserialize)]
 struct Config {
     ip_source: SecureClientIpSource,
+    port: Option<u16>,
 }
 
 #[tokio::main]
@@ -79,9 +80,12 @@ async fn main() {
         .with_state(state)
         .layer(config.ip_source.into_extension());
 
-    info!("Starting server");
+    let ip = Ipv4Addr::UNSPECIFIED;
+    let port = config.port.unwrap_or(3000);
+    let addr = SocketAddrV4::new(ip, port).into();
+    info!("Starting server in {addr}");
 
-    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
+    axum::Server::bind(&addr)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .unwrap();
