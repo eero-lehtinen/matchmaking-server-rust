@@ -18,4 +18,5 @@ FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 COPY --from=builder /app/target/release/matchmaking-server-rust /usr/local/bin
 ENV IP_SOURCE=CfConnectingIp
+ENV RUST_LOG=matchmaking_server_rust=debug
 ENTRYPOINT ["/usr/local/bin/matchmaking-server-rust"]

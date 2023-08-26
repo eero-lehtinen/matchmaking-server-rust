@@ -68,7 +68,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "matchmaking_server_rust=info".into()),
+                .unwrap_or_else(|_| "info,matchmaking_server_rust=debug".into()),
         )
         .compact()
         .without_time()
@@ -128,6 +128,10 @@ async fn create_game(
             break token;
         }
     };
+    debug!(
+        "Created game {}, addr: {}, local_addr: {}",
+        token, payload.external_address, payload.local_address
+    );
 
     let game = Game {
         timestamp: unix_time(),
@@ -171,6 +175,11 @@ async fn join_game(
         .ok_or((StatusCode::NOT_FOUND, "Game not found"))?;
 
     if payload.external_address.ip() == game.external_address.ip() {
+        debug!(
+            "Joining game {} from {} to local_addr: {}",
+            token, payload.external_address, game.local_address
+        );
+
         return Ok(Json(JoinGameResponse {
             join: game.local_address,
         }));
@@ -178,6 +187,11 @@ async fn join_game(
 
     game.clients_to_join
         .insert(payload.external_address, unix_time());
+
+    debug!(
+        "Joining game {} from {} to external_addr: {}",
+        token, payload.external_address, game.external_address
+    );
 
     Ok(Json(JoinGameResponse {
         join: game.external_address,
