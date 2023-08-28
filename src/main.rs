@@ -34,16 +34,16 @@ struct MyState {
 
 impl MyState {
     fn get_game_mut(&self, token: &str) -> Option<RefMut<String, Game>> {
-        let now = unix_time();
+        let now = unix_time_secs();
         self.games
             .get_mut(token)
-            .filter(|game| now - game.timestamp <= GAME_STALE)
+            .filter(|game| now - game.timestamp <= GAME_STALE.as_secs())
     }
 
     fn cleanup(&self) {
-        let now = unix_time();
+        let now = unix_time_secs();
         self.games
-            .retain(|_, game| now - game.timestamp <= GAME_STALE);
+            .retain(|_, game| now - game.timestamp <= GAME_STALE.as_secs());
     }
 }
 
@@ -134,7 +134,7 @@ async fn create_game(
     );
 
     let game = Game {
-        timestamp: unix_time(),
+        timestamp: unix_time_secs(),
         external_address: payload.external_address,
         local_address: payload.local_address,
         clients_to_join: HashMap::new(),
@@ -186,7 +186,7 @@ async fn join_game(
     }
 
     game.clients_to_join
-        .insert(payload.external_address, unix_time());
+        .insert(payload.external_address, unix_time_secs());
 
     debug!(
         "Joining game {} from {} to external_addr: {}",
@@ -222,34 +222,29 @@ async fn heartbeat(
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
-    let now = unix_time();
+    let now = unix_time_secs();
     game.timestamp = now;
     game.clients_to_join
-        .retain(|_, timestamp| now - *timestamp <= CLIENT_JOIN_STALE);
+        .retain(|_, timestamp| now - *timestamp <= CLIENT_JOIN_STALE.as_secs());
 
     let clients = game.clients_to_join.keys().copied().collect();
 
     Ok(Json(HeartbeatResponse { clients }))
 }
 
-// 10 seconds
-const CLIENT_JOIN_STALE: u64 = 10_000;
+const CLIENT_JOIN_STALE: Duration = Duration::from_secs(10);
+const GAME_STALE: Duration = Duration::from_secs(60);
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-// 1 minute
-const GAME_STALE: u64 = 60_000;
-
-// 5 minutes
-const CLEANUP_INTERVAL: u64 = 5 * 60_000;
-
-fn unix_time() -> u64 {
+fn unix_time_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_millis() as u64
+        .as_secs()
 }
 
 async fn cleanup(state: Arc<MyState>) {
-    let mut interval = tokio::time::interval(Duration::from_millis(CLEANUP_INTERVAL));
+    let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
     let mut last_total_games_created = 0;
     loop {
         interval.tick().await;
