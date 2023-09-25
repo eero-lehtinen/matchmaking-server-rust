@@ -71,10 +71,9 @@ async fn main() {
         .without_time()
         .init();
 
+    let state: &'static MyState = Box::leak(Box::default());
 
-    let state: &'static MyState  = Box::leak(Box::default());
-
-    tokio::task::spawn( async move { cleanup(state).await });
+    tokio::task::spawn(async move { cleanup(state).await });
 
     let app = Router::new()
         .route("/game", post(create_game))
