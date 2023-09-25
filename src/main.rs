@@ -1,10 +1,7 @@
 use std::{
     collections::HashMap,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
@@ -74,10 +71,10 @@ async fn main() {
         .without_time()
         .init();
 
-    let state = Arc::new(MyState::default());
 
-    let task_state = state.clone();
-    tokio::task::spawn(async { cleanup(task_state).await });
+    let state: &'static MyState  = Box::leak(Box::default());
+
+    tokio::task::spawn( async move { cleanup(state).await });
 
     let app = Router::new()
         .route("/game", post(create_game))
@@ -111,7 +108,7 @@ struct CreateGameResponse {
 #[debug_handler]
 async fn create_game(
     client_ip: SecureClientIp,
-    State(state): State<Arc<MyState>>,
+    State(state): State<&'static MyState>,
     extract::Json(payload): extract::Json<CreateGameRequest>,
 ) -> Result<Json<CreateGameResponse>, (StatusCode, &'static str)> {
     if client_ip.0 != payload.external_address.ip() {
@@ -158,7 +155,7 @@ struct JoinGameResponse {
 #[debug_handler]
 async fn join_game(
     client_ip: SecureClientIp,
-    State(state): State<Arc<MyState>>,
+    State(state): State<&'static MyState>,
     Path(token): Path<String>,
     extract::Json(payload): extract::Json<JoinGameRequest>,
 ) -> Result<Json<JoinGameResponse>, (StatusCode, &'static str)> {
@@ -206,7 +203,7 @@ struct HeartbeatResponse {
 #[debug_handler]
 async fn heartbeat(
     client_ip: SecureClientIp,
-    State(state): State<Arc<MyState>>,
+    State(state): State<&'static MyState>,
     Path(token): Path<String>,
 ) -> Result<Json<HeartbeatResponse>, (StatusCode, &'static str)> {
     let mut game = state
@@ -243,7 +240,7 @@ fn unix_time_secs() -> u64 {
         .as_secs()
 }
 
-async fn cleanup(state: Arc<MyState>) {
+async fn cleanup(state: &'static MyState) {
     let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
     let mut last_total_games_created = 0;
     loop {
