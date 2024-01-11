@@ -16,6 +16,7 @@ use axum_client_ip::{SecureClientIp, SecureClientIpSource};
 use dashmap::{mapref::one::RefMut, DashMap};
 use nanoid::nanoid;
 use serde::{Deserialize, Serialize};
+use tokio::net::TcpListener;
 use tracing::log::*;
 
 use mimalloc::MiMalloc;
@@ -84,13 +85,17 @@ async fn main() {
 
     let ip = Ipv4Addr::UNSPECIFIED;
     let port = config.port.unwrap_or(3000);
-    let addr = SocketAddrV4::new(ip, port).into();
+    let addr = SocketAddrV4::new(ip, port);
     info!("Starting server in {addr}");
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .unwrap();
+    let listener = TcpListener::bind(addr).await.unwrap();
+
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
 
 #[derive(Deserialize)]
