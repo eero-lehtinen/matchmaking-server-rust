@@ -17,3 +17,15 @@ git push dokku master
 IP_SOURCE=ConnectInfo cargo run
 
 ```
+
+
+## Turn server
+
+Put `coturn.service` in `/etc/systemd/system/`, `turnserver.conf` in `/etc/` and run:
+
+```sh
+sudo apt install coturn
+sudo systemctl start coturn
+```
+
+Actually I use the server in `stun-only` mode, because I don't want use TURN.
