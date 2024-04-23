@@ -468,6 +468,7 @@ dependencies = [
  "envy",
  "mimalloc",
  "nanoid",
+ "once_cell",
  "serde",
  "serde_json",
  "tokio",

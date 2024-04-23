@@ -15,6 +15,7 @@ use axum::{
 use axum_client_ip::{SecureClientIp, SecureClientIpSource};
 use dashmap::{mapref::one::RefMut, DashMap};
 use nanoid::nanoid;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::log::*;
@@ -109,6 +110,26 @@ struct CreateGameResponse {
     token: String,
 }
 
+static BAD_WORDS: Lazy<Vec<&'static str>> =
+    Lazy::new(|| include_str!("badwords.txt").lines().collect());
+
+fn contains_bad_words(token: &str) -> bool {
+    let token = token.to_ascii_lowercase();
+    for bad_word in BAD_WORDS.iter() {
+        if token.contains(bad_word) {
+            return true;
+        }
+    }
+    false
+}
+
+// Test bad words
+#[test]
+fn test_contains_bad_words() {
+    assert!(contains_bad_words("ASDF-CuMJ_K"));
+    assert!(!contains_bad_words("AdDF-aFcx"));
+}
+
 #[debug_handler]
 async fn create_game(
     client_ip: SecureClientIp,
@@ -125,7 +146,7 @@ async fn create_game(
 
     let token = loop {
         let token = nanoid!(10);
-        if !state.games.contains_key(&token) {
+        if !state.games.contains_key(&token) && !contains_bad_words(&token) {
             break token;
         }
     };
