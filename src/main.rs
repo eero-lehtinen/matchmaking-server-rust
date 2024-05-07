@@ -151,7 +151,8 @@ async fn create_game(
     }
 
     let token = loop {
-        let token = nanoid!(14, &TOKEN_ALPHABET);
+        // https://zelark.github.io/nano-id-cc/
+        let token = nanoid!(11, &TOKEN_ALPHABET);
         if !state.games.contains_key(&token) && !contains_bad_words(&token) {
             break token;
         }
