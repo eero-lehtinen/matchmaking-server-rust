@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -10,7 +10,7 @@ use std::{
 
 use axum::{
     debug_handler,
-    extract::{self, Path, State},
+    extract::{self, Path, Request, State},
     http::StatusCode,
     routing::post,
     Json, Router,
@@ -21,7 +21,11 @@ use nanoid::nanoid;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tower_governor::{governor::GovernorConfig, GovernorLayer};
+use tower_governor::{
+    governor::{GovernorConfig, GovernorConfigBuilder},
+    key_extractor::KeyExtractor,
+    GovernorError, GovernorLayer,
+};
 use tracing::log::*;
 
 use mimalloc::MiMalloc;
@@ -64,6 +68,28 @@ struct Config {
     port: Option<u16>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
+struct CfCompatibleIp;
+
+impl KeyExtractor for CfCompatibleIp {
+    type Key = IpAddr;
+
+    fn extract<B>(&self, req: &Request<B>) -> Result<Self::Key, GovernorError> {
+        if let Some(cf_ip) = req.headers().get("Cf-Connecting-IP") {
+            info!("CF IP: {:?}", cf_ip);
+            cf_ip.to_str().ok().and_then(|s| s.parse::<IpAddr>().ok())
+        } else {
+            req.extensions()
+                .get::<axum::extract::ConnectInfo<SocketAddr>>()
+                .map(|addr| {
+                    info!("NORMAL IP: {:?}", addr.ip());
+                    addr.ip()
+                })
+        }
+        .ok_or(GovernorError::UnableToExtractKey)
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let config: Config = envy::from_env().unwrap();
@@ -80,7 +106,13 @@ async fn main() {
     let state: &'static MyState = Box::leak(Box::default());
     tokio::task::spawn(free_old_state(state));
 
-    let governor_conf = Arc::new(GovernorConfig::default());
+    let governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .key_extractor(CfCompatibleIp)
+            .use_headers()
+            .finish()
+            .unwrap(),
+    );
     let limiter = governor_conf.limiter().clone();
     tokio::task::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
