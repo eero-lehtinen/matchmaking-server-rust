@@ -78,7 +78,6 @@ impl KeyExtractor for CfCompatibleIp {
 
     fn extract<B>(&self, req: &Request<B>) -> Result<Self::Key, GovernorError> {
         if let Some(cf_ip) = req.headers().get("Cf-Connecting-IP") {
-            info!("CF IP: {:?}", cf_ip);
             cf_ip.to_str().ok().and_then(|s| s.parse::<IpAddr>().ok())
         } else {
             req.extensions()
