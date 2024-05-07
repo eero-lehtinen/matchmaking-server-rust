@@ -12,9 +12,8 @@ use axum::{
     debug_handler,
     extract::{self, Path, Request, State},
     http::StatusCode,
-    middleware::IntoMapRequestResult,
     routing::post,
-    Extension, Json, Router,
+    Json, Router,
 };
 use axum_client_ip::{SecureClientIp, SecureClientIpSource};
 use dashmap::{mapref::one::RefMut, DashMap};
@@ -24,9 +23,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_governor::{
-    governor::{GovernorConfig, GovernorConfigBuilder},
-    key_extractor::KeyExtractor,
-    GovernorError, GovernorLayer,
+    governor::GovernorConfigBuilder, key_extractor::KeyExtractor, GovernorError, GovernorLayer,
 };
 use tracing::log::*;
 
