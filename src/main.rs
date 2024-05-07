@@ -12,8 +12,9 @@ use axum::{
     debug_handler,
     extract::{self, Path, Request, State},
     http::StatusCode,
+    middleware::IntoMapRequestResult,
     routing::post,
-    Json, Router,
+    Extension, Json, Router,
 };
 use axum_client_ip::{SecureClientIp, SecureClientIpSource};
 use dashmap::{mapref::one::RefMut, DashMap};
@@ -21,6 +22,7 @@ use nanoid::nanoid;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
+use tower::ServiceBuilder;
 use tower_governor::{
     governor::{GovernorConfig, GovernorConfigBuilder},
     key_extractor::KeyExtractor,
@@ -81,10 +83,7 @@ impl KeyExtractor for CfCompatibleIp {
         } else {
             req.extensions()
                 .get::<axum::extract::ConnectInfo<SocketAddr>>()
-                .map(|addr| {
-                    info!("NORMAL IP: {:?}", addr.ip());
-                    addr.ip()
-                })
+                .map(|addr| addr.ip())
         }
         .ok_or(GovernorError::UnableToExtractKey)
     }
@@ -127,10 +126,13 @@ async fn main() {
         .route("/game/:token/join", post(join_game))
         .route("/game/:token/heartbeat", post(heartbeat))
         .with_state(state)
-        .layer(config.ip_source.into_extension())
-        .layer(GovernorLayer {
-            config: governor_conf,
-        });
+        .layer(
+            ServiceBuilder::new()
+                .layer(GovernorLayer {
+                    config: governor_conf,
+                })
+                .layer(config.ip_source.into_extension()),
+        );
 
     let ip = Ipv4Addr::UNSPECIFIED;
     let port = config.port.unwrap_or(3000);
