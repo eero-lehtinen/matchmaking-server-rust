@@ -18,6 +18,11 @@ IP_SOURCE=ConnectInfo cargo run
 
 ```
 
+```sh
+curl -X POST -H "Content-Type: application/json" -d '{"external_address": "127.0.0.1:123", "local_address": "127.0.0.1:123"}' http://localhost:3000/game
+```
+
+
 
 ## Turn server
 

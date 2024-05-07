@@ -1,7 +1,10 @@
 use std::{
     collections::HashMap,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -18,6 +21,7 @@ use nanoid::nanoid;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
+use tower_governor::{governor::GovernorConfig, GovernorLayer};
 use tracing::log::*;
 
 use mimalloc::MiMalloc;
@@ -74,15 +78,27 @@ async fn main() {
         .init();
 
     let state: &'static MyState = Box::leak(Box::default());
+    tokio::task::spawn(free_old_state(state));
 
-    tokio::task::spawn(cleanup(state));
+    let governor_conf = Arc::new(GovernorConfig::default());
+    let limiter = governor_conf.limiter().clone();
+    tokio::task::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            limiter.retain_recent();
+        }
+    });
 
     let app = Router::new()
         .route("/game", post(create_game))
         .route("/game/:token/join", post(join_game))
         .route("/game/:token/heartbeat", post(heartbeat))
         .with_state(state)
-        .layer(config.ip_source.into_extension());
+        .layer(config.ip_source.into_extension())
+        .layer(GovernorLayer {
+            config: governor_conf,
+        });
 
     let ip = Ipv4Addr::UNSPECIFIED;
     let port = config.port.unwrap_or(3000);
@@ -272,7 +288,7 @@ fn unix_time_secs() -> u64 {
         .as_secs()
 }
 
-async fn cleanup(state: &'static MyState) {
+async fn free_old_state(state: &'static MyState) {
     let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
     let mut last_total_games_created = 0;
     loop {
