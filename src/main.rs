@@ -130,6 +130,12 @@ fn test_contains_bad_words() {
     assert!(!contains_bad_words("AdDF-aFcx"));
 }
 
+// Same as nanoid::alphabet::SAFE but dash, underscore and capital letters removed
+pub const TOKEN_ALPHABET: [char; 36] = [
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i',
+    'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+];
+
 #[debug_handler]
 async fn create_game(
     client_ip: SecureClientIp,
@@ -145,7 +151,7 @@ async fn create_game(
     }
 
     let token = loop {
-        let token = nanoid!(10);
+        let token = nanoid!(14, &TOKEN_ALPHABET);
         if !state.games.contains_key(&token) && !contains_bad_words(&token) {
             break token;
         }
