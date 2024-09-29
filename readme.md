@@ -2,7 +2,8 @@
 
 ```sh
 ## Init
-git remote add dokku dokku@94.177.9.119:gaming-gamers-matchmaking
+git remote add prod dokku@94.177.9.119:gaming-gamers-matchmaking
+git remote add staging dokku@94.177.9.119:gaming-gamers-matchmaking-staging
 ```
 
 ## Deploy to Dokku
@@ -21,8 +22,6 @@ IP_SOURCE=ConnectInfo cargo run
 ```sh
 curl -X POST -H "Content-Type: application/json" -d '{"external_address": "127.0.0.1:123", "local_address": "127.0.0.1:123"}' http://localhost:3000/game
 ```
-
-
 
 ## Turn server
 

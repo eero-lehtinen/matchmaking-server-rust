@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -35,14 +34,23 @@ static GLOBAL: MiMalloc = MiMalloc;
 #[derive(Debug, Default)]
 struct MyState {
     games: DashMap<String, Game>,
+    join_tokens: DashMap<String, String>,
     total_games_created: AtomicU64,
 }
 
 impl MyState {
-    fn get_game_mut(&self, token: &str) -> Option<RefMut<String, Game>> {
+    fn get_game_mut_by_join_token(&self, token: &str) -> Option<RefMut<String, Game>> {
+        let now = unix_time_secs();
+        let game_id = self.join_tokens.get(token)?;
+        self.games
+            .get_mut(&*game_id)
+            .filter(|game| now - game.timestamp <= GAME_STALE.as_secs())
+    }
+
+    fn get_game_mut(&self, game_id: &str) -> Option<RefMut<String, Game>> {
         let now = unix_time_secs();
         self.games
-            .get_mut(token)
+            .get_mut(game_id)
             .filter(|game| now - game.timestamp <= GAME_STALE.as_secs())
     }
 
@@ -58,7 +66,7 @@ struct Game {
     timestamp: u64,
     external_address: SocketAddr,
     local_address: SocketAddr,
-    clients_to_join: HashMap<SocketAddr, u64>,
+    clients_to_join: Vec<(JoinClient, u64)>,
 }
 
 #[derive(Deserialize)]
@@ -119,8 +127,8 @@ async fn main() {
 
     let app = Router::new()
         .route("/game", post(create_game))
-        .route("/game/:token/join", post(join_game))
-        .route("/game/:token/heartbeat", post(heartbeat))
+        .route("/join/:token", post(join_game))
+        .route("/heartbeat/:game_id", post(heartbeat))
         .with_state(state)
         .layer(
             ServiceBuilder::new()
@@ -153,6 +161,7 @@ struct CreateGameRequest {
 
 #[derive(Serialize)]
 struct CreateGameResponse {
+    game_id: String,
     token: String,
 }
 
@@ -199,30 +208,39 @@ async fn create_game(
     let token = loop {
         // https://zelark.github.io/nano-id-cc/
         let token = nanoid!(10, &TOKEN_ALPHABET);
-        if !state.games.contains_key(&token) && !contains_bad_words(&token) {
+        if !state.join_tokens.contains_key(&token) && !contains_bad_words(&token) {
             break token;
         }
     };
+    let game_id = loop {
+        let game_id = nanoid!(20, &TOKEN_ALPHABET);
+        if !state.games.contains_key(&game_id) {
+            break game_id;
+        }
+    };
     debug!(
-        "Created game {}, addr: {}, local_addr: {}",
-        token, payload.external_address, payload.local_address
+        "Created game {}, token: {}, addr: {}, local_addr: {}",
+        game_id, token, payload.external_address, payload.local_address
     );
 
     let game = Game {
         timestamp: unix_time_secs(),
         external_address: payload.external_address,
         local_address: payload.local_address,
-        clients_to_join: HashMap::new(),
+        clients_to_join: Vec::new(),
     };
-    state.games.insert(token.clone(), game);
+    state.games.insert(game_id.clone(), game);
+    state.join_tokens.insert(token.clone(), game_id.clone());
     state.total_games_created.fetch_add(1, Ordering::Relaxed);
 
-    Ok(Json(CreateGameResponse { token }))
+    Ok(Json(CreateGameResponse { token, game_id }))
 }
 
 #[derive(Deserialize)]
 struct JoinGameRequest {
     external_address: SocketAddr,
+    #[serde(default)]
+    hard_nat: bool,
 }
 
 #[derive(Serialize)]
@@ -246,7 +264,7 @@ async fn join_game(
     }
 
     let mut game = state
-        .get_game_mut(&token)
+        .get_game_mut_by_join_token(&token)
         .ok_or((StatusCode::NOT_FOUND, "Game not found"))?;
 
     if payload.external_address.ip() == game.external_address.ip() {
@@ -260,8 +278,13 @@ async fn join_game(
         }));
     }
 
-    game.clients_to_join
-        .insert(payload.external_address, unix_time_secs());
+    game.clients_to_join.push((
+        JoinClient {
+            addr: payload.external_address,
+            hard_nat: payload.hard_nat,
+        },
+        unix_time_secs(),
+    ));
 
     debug!(
         "Joining game {} from {} to external_addr: {}",
@@ -275,17 +298,23 @@ async fn join_game(
 
 #[derive(Serialize)]
 struct HeartbeatResponse {
-    clients: Vec<SocketAddr>,
+    clients: Vec<JoinClient>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct JoinClient {
+    pub addr: SocketAddr,
+    pub hard_nat: bool,
 }
 
 #[debug_handler]
 async fn heartbeat(
     client_ip: SecureClientIp,
     State(state): State<&'static MyState>,
-    Path(token): Path<String>,
+    Path(game_id): Path<String>,
 ) -> Result<Json<HeartbeatResponse>, (StatusCode, &'static str)> {
     let mut game = state
-        .get_game_mut(&token)
+        .get_game_mut(&game_id)
         .ok_or((StatusCode::NOT_FOUND, "Game not found"))?;
 
     if client_ip.0 != game.external_address.ip() {
@@ -300,9 +329,14 @@ async fn heartbeat(
     let now = unix_time_secs();
     game.timestamp = now;
     game.clients_to_join
-        .retain(|_, timestamp| now - *timestamp <= CLIENT_JOIN_STALE.as_secs());
+        .retain(|(_, timestamp)| now - *timestamp <= CLIENT_JOIN_STALE.as_secs());
 
-    let clients = game.clients_to_join.keys().copied().collect();
+    let clients = game
+        .clients_to_join
+        .iter()
+        .map(|(c, _)| c)
+        .cloned()
+        .collect();
 
     Ok(Json(HeartbeatResponse { clients }))
 }
