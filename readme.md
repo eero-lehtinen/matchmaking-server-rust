@@ -9,7 +9,7 @@ git remote add staging dokku@94.177.9.119:gaming-gamers-matchmaking-staging
 ## Deploy to Dokku
 
 ```sh
-git push dokku master
+git push staging master
 ```
 
 ## Run
