@@ -330,13 +330,7 @@ async fn heartbeat(
     game.timestamp = now;
     game.clients_to_join
         .retain(|(_, timestamp)| now - *timestamp <= CLIENT_JOIN_STALE.as_secs());
-
-    let clients = game
-        .clients_to_join
-        .iter()
-        .map(|(c, _)| c)
-        .cloned()
-        .collect();
+    let clients = game.clients_to_join.drain(..).map(|(c, _)| c).collect();
 
     Ok(Json(HeartbeatResponse { clients }))
 }
