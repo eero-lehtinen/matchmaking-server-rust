@@ -2,7 +2,7 @@ use axum::{
     debug_handler,
     extract::{self, Path, State},
     http::StatusCode,
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use axum_client_ip::{SecureClientIp, SecureClientIpSource};
@@ -44,6 +44,7 @@ async fn main() {
     tokio::task::spawn(state_cleanup(state));
 
     let app = Router::new()
+        .route("/ping", get(ping))
         .route("/game", post(create_game))
         .route("/join/:token", post(join_game))
         .route("/heartbeat/:game_id", post(heartbeat))
@@ -67,6 +68,11 @@ async fn main() {
     )
     .await
     .unwrap();
+}
+
+#[debug_handler]
+async fn ping() -> &'static str {
+    "pong"
 }
 
 #[derive(Deserialize)]
