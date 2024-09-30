@@ -1,96 +1,30 @@
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
-
 use axum::{
     debug_handler,
-    extract::{self, Path, Request, State},
+    extract::{self, Path, State},
     http::StatusCode,
     routing::post,
     Json, Router,
 };
 use axum_client_ip::{SecureClientIp, SecureClientIpSource};
-use dashmap::{mapref::one::RefMut, DashMap};
-use nanoid::nanoid;
-use once_cell::sync::Lazy;
+use governor::make_governor_layer;
+use mimalloc::MiMalloc;
 use serde::{Deserialize, Serialize};
+use state::{state_cleanup, JoinClient, MyState};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
-use tower_governor::{
-    governor::GovernorConfigBuilder, key_extractor::KeyExtractor, GovernorError, GovernorLayer,
-};
 use tracing::log::*;
 
-use mimalloc::MiMalloc;
+mod governor;
+mod state;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
-
-#[derive(Debug, Default)]
-struct MyState {
-    games: DashMap<String, Game>,
-    join_tokens: DashMap<String, String>,
-    total_games_created: AtomicU64,
-}
-
-impl MyState {
-    fn get_game_mut_by_join_token(&self, token: &str) -> Option<RefMut<String, Game>> {
-        let now = unix_time_secs();
-        let game_id = self.join_tokens.get(token)?;
-        self.games
-            .get_mut(&*game_id)
-            .filter(|game| now - game.timestamp <= GAME_STALE.as_secs())
-    }
-
-    fn get_game_mut(&self, game_id: &str) -> Option<RefMut<String, Game>> {
-        let now = unix_time_secs();
-        self.games
-            .get_mut(game_id)
-            .filter(|game| now - game.timestamp <= GAME_STALE.as_secs())
-    }
-
-    fn cleanup(&self) {
-        let now = unix_time_secs();
-        self.games
-            .retain(|_, game| now - game.timestamp <= GAME_STALE.as_secs());
-    }
-}
-
-#[derive(Debug)]
-struct Game {
-    timestamp: u64,
-    external_address: SocketAddr,
-    local_address: SocketAddr,
-    clients_to_join: Vec<(JoinClient, u64)>,
-}
 
 #[derive(Deserialize)]
 struct Config {
     ip_source: SecureClientIpSource,
     port: Option<u16>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
-struct CfCompatibleIp;
-
-impl KeyExtractor for CfCompatibleIp {
-    type Key = IpAddr;
-
-    fn extract<B>(&self, req: &Request<B>) -> Result<Self::Key, GovernorError> {
-        if let Some(cf_ip) = req.headers().get("Cf-Connecting-IP") {
-            cf_ip.to_str().ok().and_then(|s| s.parse::<IpAddr>().ok())
-        } else {
-            req.extensions()
-                .get::<axum::extract::ConnectInfo<SocketAddr>>()
-                .map(|addr| addr.ip())
-        }
-        .ok_or(GovernorError::UnableToExtractKey)
-    }
 }
 
 #[tokio::main]
@@ -107,23 +41,7 @@ async fn main() {
         .init();
 
     let state: &'static MyState = Box::leak(Box::default());
-    tokio::task::spawn(free_old_state(state));
-
-    let governor_conf = Arc::new(
-        GovernorConfigBuilder::default()
-            .key_extractor(CfCompatibleIp)
-            .use_headers()
-            .finish()
-            .unwrap(),
-    );
-    let limiter = governor_conf.limiter().clone();
-    tokio::task::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(60));
-        loop {
-            interval.tick().await;
-            limiter.retain_recent();
-        }
-    });
+    tokio::task::spawn(state_cleanup(state));
 
     let app = Router::new()
         .route("/game", post(create_game))
@@ -132,9 +50,7 @@ async fn main() {
         .with_state(state)
         .layer(
             ServiceBuilder::new()
-                .layer(GovernorLayer {
-                    config: governor_conf,
-                })
+                .layer(make_governor_layer())
                 .layer(config.ip_source.into_extension()),
         );
 
@@ -165,32 +81,6 @@ struct CreateGameResponse {
     token: String,
 }
 
-static BAD_WORDS: Lazy<Vec<&'static str>> =
-    Lazy::new(|| include_str!("badwords.txt").lines().collect());
-
-fn contains_bad_words(token: &str) -> bool {
-    let token = token.to_ascii_lowercase();
-    for bad_word in BAD_WORDS.iter() {
-        if token.contains(bad_word) {
-            return true;
-        }
-    }
-    false
-}
-
-// Test bad words
-#[test]
-fn test_contains_bad_words() {
-    assert!(contains_bad_words("ASDF-CuMJ_K"));
-    assert!(!contains_bad_words("AdDF-aFcx"));
-}
-
-// Same as nanoid::alphabet::SAFE but dash, underscore and capital letters removed
-pub const TOKEN_ALPHABET: [char; 36] = [
-    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i',
-    'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
-];
-
 #[debug_handler]
 async fn create_game(
     client_ip: SecureClientIp,
@@ -205,33 +95,7 @@ async fn create_game(
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
-    let token = loop {
-        // https://zelark.github.io/nano-id-cc/
-        let token = nanoid!(10, &TOKEN_ALPHABET);
-        if !state.join_tokens.contains_key(&token) && !contains_bad_words(&token) {
-            break token;
-        }
-    };
-    let game_id = loop {
-        let game_id = nanoid!(20, &TOKEN_ALPHABET);
-        if !state.games.contains_key(&game_id) {
-            break game_id;
-        }
-    };
-    debug!(
-        "Created game {}, token: {}, addr: {}, local_addr: {}",
-        game_id, token, payload.external_address, payload.local_address
-    );
-
-    let game = Game {
-        timestamp: unix_time_secs(),
-        external_address: payload.external_address,
-        local_address: payload.local_address,
-        clients_to_join: Vec::new(),
-    };
-    state.games.insert(game_id.clone(), game);
-    state.join_tokens.insert(token.clone(), game_id.clone());
-    state.total_games_created.fetch_add(1, Ordering::Relaxed);
+    let (game_id, token) = state.create_game(payload.external_address, payload.local_address);
 
     Ok(Json(CreateGameResponse { token, game_id }))
 }
@@ -278,13 +142,10 @@ async fn join_game(
         }));
     }
 
-    game.clients_to_join.push((
-        JoinClient {
-            addr: payload.external_address,
-            hard_nat: payload.hard_nat,
-        },
-        unix_time_secs(),
-    ));
+    game.add_joiner(JoinClient {
+        addr: payload.external_address,
+        hard_nat: payload.hard_nat,
+    });
 
     debug!(
         "Joining game {} from {} to external_addr: {}",
@@ -299,12 +160,6 @@ async fn join_game(
 #[derive(Serialize)]
 struct HeartbeatResponse {
     clients: Vec<JoinClient>,
-}
-
-#[derive(Serialize, Debug, Clone)]
-struct JoinClient {
-    pub addr: SocketAddr,
-    pub hard_nat: bool,
 }
 
 #[debug_handler]
@@ -326,40 +181,7 @@ async fn heartbeat(
         return Err((StatusCode::BAD_REQUEST, "IPs don't match"));
     }
 
-    let now = unix_time_secs();
-    game.timestamp = now;
-    game.clients_to_join
-        .retain(|(_, timestamp)| now - *timestamp <= CLIENT_JOIN_STALE.as_secs());
-    let clients = game.clients_to_join.drain(..).map(|(c, _)| c).collect();
-
-    Ok(Json(HeartbeatResponse { clients }))
-}
-
-const CLIENT_JOIN_STALE: Duration = Duration::from_secs(10);
-const GAME_STALE: Duration = Duration::from_secs(60);
-const CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
-
-fn unix_time_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-}
-
-async fn free_old_state(state: &'static MyState) {
-    let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
-    let mut last_total_games_created = 0;
-    loop {
-        interval.tick().await;
-        state.cleanup();
-        let diff_games_created =
-            state.total_games_created.load(Ordering::Relaxed) - last_total_games_created;
-        if diff_games_created > 0 {
-            last_total_games_created += diff_games_created;
-            info!(
-                "Total games created: {}, in the last 5 mins: {}",
-                last_total_games_created, diff_games_created
-            );
-        }
-    }
+    Ok(Json(HeartbeatResponse {
+        clients: game.drain_joiners(),
+    }))
 }

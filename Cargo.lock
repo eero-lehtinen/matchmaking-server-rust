@@ -549,6 +549,7 @@ dependencies = [
  "axum-client-ip",
  "dashmap 6.1.0",
  "envy",
+ "governor",
  "mimalloc",
  "nanoid",
  "once_cell",
