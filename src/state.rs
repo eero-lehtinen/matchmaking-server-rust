@@ -1,6 +1,7 @@
 use dashmap::{mapref::one::RefMut, DashMap};
 use nanoid::nanoid;
 use once_cell::sync::Lazy;
+use regex::{Regex, RegexBuilder};
 use serde::Serialize;
 use std::{
     net::SocketAddr,
@@ -127,17 +128,20 @@ pub async fn state_cleanup(state: &'static MyState) {
     }
 }
 
-static BAD_WORDS: Lazy<Vec<&'static str>> =
-    Lazy::new(|| include_str!("badwords.txt").lines().collect());
+static BAD_WORDS_REGEX: Lazy<Regex> = Lazy::new(|| {
+    let words = include_str!("badwords.txt")
+        .lines()
+        .collect::<Vec<_>>()
+        .join("|");
+    RegexBuilder::new(&words)
+        .case_insensitive(true)
+        .unicode(false)
+        .build()
+        .unwrap()
+});
 
 fn contains_bad_words(token: &str) -> bool {
-    let token = token.to_ascii_lowercase();
-    for bad_word in BAD_WORDS.iter() {
-        if token.contains(bad_word) {
-            return true;
-        }
-    }
-    false
+    BAD_WORDS_REGEX.is_match(token)
 }
 
 // Test bad words
@@ -145,6 +149,18 @@ fn contains_bad_words(token: &str) -> bool {
 fn test_contains_bad_words() {
     assert!(contains_bad_words("ASDF-CuMJ_K"));
     assert!(!contains_bad_words("AdDF-aFcx"));
+}
+
+#[test]
+fn scuffed_bench() {
+    let mut total = 0;
+    for _ in 0..1000000 {
+        if contains_bad_words("as3dfbi74") {
+            total += 1;
+        }
+    }
+
+    println!("{}", total)
 }
 
 // Same as nanoid::alphabet::SAFE but dash, underscore and capital letters removed
