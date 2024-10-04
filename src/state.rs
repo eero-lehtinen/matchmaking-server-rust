@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::{
     net::SocketAddr,
     sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tracing::{debug, info};
 
@@ -22,11 +22,11 @@ pub struct MyState {
 
 #[derive(Debug)]
 pub struct Game {
-    pub timestamp: u64,
-    pub token: String,
+    pub updated: Instant,
+    pub join_token: String,
     pub external_address: SocketAddr,
     pub local_address: SocketAddr,
-    pub clients_to_join: Vec<(JoinClient, u64)>,
+    pub clients_to_join: Vec<(JoinClient, Instant)>,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -37,18 +37,14 @@ pub struct JoinClient {
 
 impl MyState {
     pub fn get_game_mut_by_join_token(&self, token: &str) -> Option<RefMut<String, Game>> {
-        let now = unix_time_secs();
         let game_id = self.join_tokens.get(token)?;
-        self.games
-            .get_mut(&*game_id)
-            .filter(|game| now - game.timestamp <= GAME_STALE.as_secs())
+        self.get_game_mut(&game_id)
     }
 
     pub fn get_game_mut(&self, game_id: &str) -> Option<RefMut<String, Game>> {
-        let now = unix_time_secs();
         self.games
             .get_mut(game_id)
-            .filter(|game| now - game.timestamp <= GAME_STALE.as_secs())
+            .filter(|game| game.updated.elapsed() <= GAME_STALE)
     }
 
     pub fn create_game(
@@ -74,8 +70,8 @@ impl MyState {
             game_id, token, external_address, local_address
         );
         let game = Game {
-            timestamp: unix_time_secs(),
-            token: token.clone(),
+            updated: Instant::now(),
+            join_token: token.clone(),
             external_address,
             local_address,
             clients_to_join: Vec::new(),
@@ -88,11 +84,10 @@ impl MyState {
     }
 
     pub fn cleanup(&self) {
-        let now = unix_time_secs();
         self.games.retain(|_, game| {
-            let retain = now - game.timestamp <= GAME_STALE.as_secs();
+            let retain = game.updated.elapsed() <= GAME_STALE;
             if !retain {
-                self.join_tokens.remove(&game.token);
+                self.join_tokens.remove(&game.join_token);
             }
             retain
         });
@@ -101,25 +96,17 @@ impl MyState {
 
 impl Game {
     pub fn drain_joiners(&mut self) -> Vec<JoinClient> {
-        let now = unix_time_secs();
-        self.timestamp = now;
+        self.updated = Instant::now();
         self.clients_to_join
             .drain(..)
-            .filter(|(_, timestamp)| now - *timestamp <= CLIENT_JOIN_STALE.as_secs())
+            .filter(|(_, created)| created.elapsed() <= CLIENT_JOIN_STALE)
             .map(|(c, _)| c)
             .collect()
     }
 
     pub fn add_joiner(&mut self, client: JoinClient) {
-        self.clients_to_join.push((client, unix_time_secs()));
+        self.clients_to_join.push((client, Instant::now()));
     }
-}
-
-fn unix_time_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
 }
 
 pub async fn state_cleanup(state: &'static MyState) {
