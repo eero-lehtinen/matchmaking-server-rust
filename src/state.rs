@@ -17,7 +17,7 @@ const CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
 #[derive(Debug, Default)]
 pub struct MyState {
     games: DashMap<String, Game>,
-    join_tokens: DashMap<String, String>,
+    token_to_game: DashMap<String, String>,
     pub total_games_created: AtomicU64,
 }
 
@@ -38,7 +38,7 @@ pub struct JoinClient {
 
 impl MyState {
     pub fn get_game_mut_by_join_token(&self, token: &str) -> Option<RefMut<String, Game>> {
-        let game_id = self.join_tokens.get(token)?;
+        let game_id = self.token_to_game.get(token)?;
         self.get_game_mut(&game_id)
     }
 
@@ -62,7 +62,7 @@ impl MyState {
         let token = loop {
             // https://zelark.github.io/nano-id-cc/
             let token = nanoid!(10, &TOKEN_ALPHABET);
-            if !self.join_tokens.contains_key(&token) && !contains_bad_words(&token) {
+            if !self.token_to_game.contains_key(&token) && !contains_bad_words(&token) {
                 break token;
             }
         };
@@ -78,7 +78,7 @@ impl MyState {
             clients_to_join: Vec::new(),
         };
         self.games.insert(game_id.clone(), game);
-        self.join_tokens.insert(token.clone(), game_id.clone());
+        self.token_to_game.insert(token.clone(), game_id.clone());
         self.total_games_created.fetch_add(1, Ordering::Relaxed);
 
         (game_id, token)
@@ -88,7 +88,7 @@ impl MyState {
         self.games.retain(|_, game| {
             let retain = game.updated.elapsed() <= GAME_STALE;
             if !retain {
-                self.join_tokens.remove(&game.join_token);
+                self.token_to_game.remove(&game.join_token);
             }
             retain
         });
