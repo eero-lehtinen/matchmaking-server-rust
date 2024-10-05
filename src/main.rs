@@ -1,6 +1,6 @@
 use axum::{
     debug_handler,
-    extract::{self, Path, State},
+    extract::{self, connect_info::IntoMakeServiceWithConnectInfo, Path, State},
     http::StatusCode,
     routing::{get, post},
     Json, Router,
@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use state::{state_cleanup, JoinClient, MyState};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::net::TcpListener;
-use tower::ServiceBuilder;
 use tracing::log::*;
 
 mod governor;
@@ -24,7 +23,16 @@ static GLOBAL: MiMalloc = MiMalloc;
 #[derive(Deserialize)]
 struct Config {
     ip_source: SecureClientIpSource,
-    port: Option<u16>,
+    #[serde(default = "default_port")]
+    port: u16,
+    #[serde(default = "default_rate_limit")]
+    rate_limit: bool,
+}
+fn default_port() -> u16 {
+    3000
+}
+fn default_rate_limit() -> bool {
+    true
 }
 
 #[tokio::main]
@@ -40,34 +48,32 @@ async fn main() {
         .without_time()
         .init();
 
+    let ip = Ipv4Addr::UNSPECIFIED;
+    let addr = SocketAddrV4::new(ip, config.port);
+    info!("Starting server in {addr}");
+
+    let listener = TcpListener::bind(addr).await.unwrap();
+
+    axum::serve(listener, app(config)).await.unwrap();
+}
+
+fn app(config: Config) -> IntoMakeServiceWithConnectInfo<Router, SocketAddr> {
     let state: &'static MyState = Box::leak(Box::default());
     tokio::task::spawn(state_cleanup(state));
 
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/ping", get(ping))
         .route("/game", post(create_game))
         .route("/join/:token", post(join_game))
         .route("/heartbeat/:game_id", post(heartbeat))
         .with_state(state)
-        .layer(
-            ServiceBuilder::new()
-                .layer(make_governor_layer())
-                .layer(config.ip_source.into_extension()),
-        );
+        .layer(config.ip_source.into_extension());
 
-    let ip = Ipv4Addr::UNSPECIFIED;
-    let port = config.port.unwrap_or(3000);
-    let addr = SocketAddrV4::new(ip, port);
-    info!("Starting server in {addr}");
+    if config.rate_limit {
+        app = app.layer(make_governor_layer());
+    }
 
-    let listener = TcpListener::bind(addr).await.unwrap();
-
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await
-    .unwrap();
+    app.into_make_service_with_connect_info()
 }
 
 #[debug_handler]
