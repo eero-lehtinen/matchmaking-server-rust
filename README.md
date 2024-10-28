@@ -15,8 +15,7 @@ git push staging master
 ## Run
 
 ```sh
-IP_SOURCE=ConnectInfo cargo run
-
+IP_SOURCE=ConnectInfo RATE_LIMIT=false cargo run
 ```
 
 ```sh
