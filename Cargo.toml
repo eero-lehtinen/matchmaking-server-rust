@@ -6,11 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-axum = { version = "0.7.3", features = ["macros"] }
-axum-client-ip = "0.6.0"
+axum = { version = "0.8.3", features = ["macros"] }
+axum-client-ip = "0.7.0"
 dashmap = "6.1.0"
 envy = "0.4.2"
-governor = "0.7.0"
+governor = "0.8.0"
 mimalloc = { version = "0.1.37", default-features = false }
 nanoid = "0.4.0"
 once_cell = "1.19.0"
@@ -19,6 +19,6 @@ serde = { version = "1.0.164", features = ["derive"] }
 serde_json = "1.0.96"
 tokio = { version = "1.28.2", features = ["full"] }
 tower = "0.5.1"
-tower_governor = { git = "https://github.com/benwis/tower-governor", rev = "e6781a7" }
+tower_governor = "0.7.0"
 tracing = { version = "0.1.37", features = ["release_max_level_info"] }
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }

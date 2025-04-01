@@ -64,8 +64,8 @@ fn app(config: Config) -> IntoMakeServiceWithConnectInfo<Router, SocketAddr> {
     let mut app = Router::new()
         .route("/ping", get(ping))
         .route("/game", post(create_game))
-        .route("/join/:token", post(join_game))
-        .route("/heartbeat/:game_id", post(heartbeat))
+        .route("/join/{token}", post(join_game))
+        .route("/heartbeat/{game_id}", post(heartbeat))
         .with_state(state)
         .layer(config.ip_source.into_extension());
 
