@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use axum_client_ip::{SecureClientIp, SecureClientIpSource};
+use axum_client_ip::{ClientIp, ClientIpSource};
 use governor::make_governor_layer;
 use mimalloc::MiMalloc;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 #[derive(Deserialize)]
 struct Config {
-    ip_source: SecureClientIpSource,
+    ip_source: ClientIpSource,
     #[serde(default = "default_port")]
     port: u16,
     #[serde(default = "default_rate_limit")]
@@ -95,7 +95,7 @@ struct CreateGameResponse {
 
 #[debug_handler]
 async fn create_game(
-    client_ip: SecureClientIp,
+    client_ip: ClientIp,
     State(state): State<&'static MyState>,
     extract::Json(payload): extract::Json<CreateGameRequest>,
 ) -> Result<Json<CreateGameResponse>, (StatusCode, &'static str)> {
@@ -126,7 +126,7 @@ struct JoinGameResponse {
 
 #[debug_handler]
 async fn join_game(
-    client_ip: SecureClientIp,
+    client_ip: ClientIp,
     State(state): State<&'static MyState>,
     Path(token): Path<String>,
     extract::Json(payload): extract::Json<JoinGameRequest>,
@@ -176,7 +176,7 @@ struct HeartbeatResponse {
 
 #[debug_handler]
 async fn heartbeat(
-    client_ip: SecureClientIp,
+    client_ip: ClientIp,
     State(state): State<&'static MyState>,
     Path(game_id): Path<String>,
 ) -> Result<Json<HeartbeatResponse>, (StatusCode, &'static str)> {

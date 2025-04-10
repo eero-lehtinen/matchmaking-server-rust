@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 axum = { version = "0.8.3", features = ["macros"] }
-axum-client-ip = "0.7.0"
+axum-client-ip = "1.0.0"
 dashmap = "6.1.0"
 envy = "0.4.2"
 governor = "0.8.0"
