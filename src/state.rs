@@ -1,24 +1,25 @@
 use dashmap::{mapref::one::RefMut, DashMap};
+use metrics::{counter, gauge};
+use metrics_exporter_prometheus::PrometheusHandle;
 use nanoid::nanoid;
 use once_cell::sync::Lazy;
 use regex::{Regex, RegexBuilder};
 use serde::Serialize;
 use std::{
     net::SocketAddr,
-    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
-use tracing::{debug, info};
+use tracing::debug;
 
 const CLIENT_JOIN_STALE: Duration = Duration::from_secs(10);
 const GAME_STALE: Duration = Duration::from_secs(60);
 const CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MyState {
+    pub prometheus_handle: PrometheusHandle,
     games: DashMap<String, Game>,
     token_to_game: DashMap<String, String>,
-    pub total_games_created: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -37,6 +38,14 @@ pub struct JoinClient {
 }
 
 impl MyState {
+    pub fn new(prometheus_handle: PrometheusHandle) -> Self {
+        Self {
+            prometheus_handle,
+            games: DashMap::new(),
+            token_to_game: DashMap::new(),
+        }
+    }
+
     pub fn get_game_mut_by_join_token(&self, token: &str) -> Option<RefMut<String, Game>> {
         let game_id = self.token_to_game.get(token)?;
         self.get_game_mut(&game_id)
@@ -79,7 +88,8 @@ impl MyState {
         };
         self.games.insert(game_id.clone(), game);
         self.token_to_game.insert(token.clone(), game_id.clone());
-        self.total_games_created.fetch_add(1, Ordering::Relaxed);
+        let created_counter = counter!("games_created");
+        created_counter.increment(1);
 
         (game_id, token)
     }
@@ -92,6 +102,9 @@ impl MyState {
             }
             retain
         });
+
+        let ongoing_gauge = gauge!("ongoing_games");
+        ongoing_gauge.set(self.games.len() as f64);
     }
 }
 
@@ -112,19 +125,9 @@ impl Game {
 
 pub async fn state_cleanup(state: &'static MyState) {
     let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
-    let mut last_total_games_created = 0;
     loop {
         interval.tick().await;
         state.cleanup();
-        let diff_games_created =
-            state.total_games_created.load(Ordering::Relaxed) - last_total_games_created;
-        if diff_games_created > 0 {
-            last_total_games_created += diff_games_created;
-            info!(
-                "Total games created: {}, in the last 5 mins: {}",
-                last_total_games_created, diff_games_created
-            );
-        }
     }
 }
 
@@ -160,7 +163,7 @@ fn scuffed_bench() {
         }
     }
 
-    println!("{}", total)
+    println!("{total}")
 }
 
 // Same as nanoid::alphabet::SAFE but dash, underscore and capital letters removed

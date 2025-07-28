@@ -1,16 +1,20 @@
 use axum::{
     debug_handler,
     extract::{self, connect_info::IntoMakeServiceWithConnectInfo, Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     routing::{get, post},
     Json, Router,
 };
 use axum_client_ip::{ClientIp, ClientIpSource};
 use governor::make_governor_layer;
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use mimalloc::MiMalloc;
 use serde::{Deserialize, Serialize};
 use state::{state_cleanup, JoinClient, MyState};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::{
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    time::Duration,
+};
 use tokio::net::TcpListener;
 use tracing::log::*;
 
@@ -39,14 +43,7 @@ fn default_rate_limit() -> bool {
 async fn main() {
     let config: Config = envy::from_env().unwrap();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,matchmaking_server_rust=debug".into()),
-        )
-        .compact()
-        .without_time()
-        .init();
+    init_tracing();
 
     let ip = Ipv4Addr::UNSPECIFIED;
     let addr = SocketAddrV4::new(ip, config.port);
@@ -58,7 +55,7 @@ async fn main() {
 }
 
 fn app(config: Config) -> IntoMakeServiceWithConnectInfo<Router, SocketAddr> {
-    let state: &'static MyState = Box::leak(Box::default());
+    let state: &'static MyState = Box::leak(Box::new(MyState::new(make_prometheus())));
     tokio::task::spawn(state_cleanup(state));
 
     let mut app = Router::new()
@@ -66,14 +63,58 @@ fn app(config: Config) -> IntoMakeServiceWithConnectInfo<Router, SocketAddr> {
         .route("/game", post(create_game))
         .route("/join/{token}", post(join_game))
         .route("/heartbeat/{game_id}", post(heartbeat))
+        .route("/metrics", get(metrics))
         .with_state(state)
-        .layer(config.ip_source.into_extension());
+        .layer(config.ip_source.into_extension())
+        .layer(axum_metrics::MetricLayer::default());
 
     if config.rate_limit {
         app = app.layer(make_governor_layer());
     }
 
     app.into_make_service_with_connect_info()
+}
+
+fn make_prometheus() -> PrometheusHandle {
+    let prometheus_handle = PrometheusBuilder::new().install_recorder().unwrap();
+    let prometheus_handle2 = prometheus_handle.clone();
+    tokio::task::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            prometheus_handle2.run_upkeep();
+        }
+    });
+    prometheus_handle
+}
+
+fn init_tracing() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,matchmaking_server_rust=debug".into()),
+        )
+        .compact()
+        .without_time()
+        .init();
+}
+
+#[debug_handler]
+async fn metrics(
+    State(state): State<&'static MyState>,
+    headers: HeaderMap,
+) -> Result<String, StatusCode> {
+    dbg!(headers.iter().collect::<Vec<_>>());
+    if headers
+        .get("Authorization")
+        .and_then(|auth| auth.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .is_none_or(|s| s != "kEtjcINjG4lhkdCF2ot1h")
+    {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    Ok(state.prometheus_handle.render())
 }
 
 #[debug_handler]

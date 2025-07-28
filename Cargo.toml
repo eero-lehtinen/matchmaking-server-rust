@@ -22,3 +22,8 @@ tower = "0.5.1"
 tower_governor = "0.7.0"
 tracing = { version = "0.1.37", features = ["release_max_level_info"] }
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+metrics-exporter-prometheus = { version = "0.17.2", default-features = false, features = [
+	"push-gateway",
+] }
+axum-metrics = "0.2.0"
+metrics = "0.24.2"
