@@ -15,6 +15,7 @@ RUN cargo build --release
 
 # We do not need the Rust toolchain to run the binary!
 FROM debian:bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/target/release/matchmaking-server-rust /usr/local/bin
 ENV IP_SOURCE=CfConnectingIp
