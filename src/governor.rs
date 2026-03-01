@@ -29,7 +29,7 @@ impl KeyExtractor for CfCompatibleIp {
     }
 }
 
-pub fn make_governor_layer() -> GovernorLayer<CfCompatibleIp, NoOpMiddleware> {
+pub fn make_governor_layer<B>() -> GovernorLayer<CfCompatibleIp, NoOpMiddleware, B> {
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
             .key_extractor(CfCompatibleIp)
@@ -45,7 +45,5 @@ pub fn make_governor_layer() -> GovernorLayer<CfCompatibleIp, NoOpMiddleware> {
         }
     });
 
-    GovernorLayer {
-        config: governor_conf,
-    }
+    GovernorLayer::new(governor_conf)
 }
