@@ -9,6 +9,7 @@ use axum_client_ip::{ClientIp, ClientIpSource};
 use governor::make_governor_layer;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use mimalloc::MiMalloc;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use state::{state_cleanup, JoinClient, MyState};
 use std::{
@@ -31,6 +32,8 @@ struct Config {
     port: u16,
     #[serde(default = "default_rate_limit")]
     rate_limit: bool,
+    #[serde(default)]
+    matrics_token: Option<String>,
 }
 fn default_port() -> u16 {
     3000
@@ -54,16 +57,24 @@ async fn main() {
     axum::serve(listener, app(config)).await.unwrap();
 }
 
+static METRICS_TOKEN: OnceCell<String> = OnceCell::new();
+
 fn app(config: Config) -> IntoMakeServiceWithConnectInfo<Router, SocketAddr> {
     let state: &'static MyState = Box::leak(Box::new(MyState::new(make_prometheus())));
     tokio::task::spawn(state_cleanup(state));
 
-    let mut app = Router::new()
+    let mut router = Router::new()
         .route("/ping", get(ping))
         .route("/game", post(create_game))
         .route("/join/{token}", post(join_game))
-        .route("/heartbeat/{game_id}", post(heartbeat))
-        .route("/metrics", get(metrics))
+        .route("/heartbeat/{game_id}", post(heartbeat));
+
+    if let Some(token) = config.matrics_token {
+        METRICS_TOKEN.set(token).unwrap();
+        router = router.route("/metrics", get(metrics));
+    }
+
+    let mut app = router
         .with_state(state)
         .layer(config.ip_source.into_extension())
         .layer(axum_metrics::MetricLayer::default());
@@ -104,12 +115,11 @@ async fn metrics(
     State(state): State<&'static MyState>,
     headers: HeaderMap,
 ) -> Result<String, StatusCode> {
-    dbg!(headers.iter().collect::<Vec<_>>());
     if headers
         .get("Authorization")
         .and_then(|auth| auth.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "))
-        .is_none_or(|s| s != "kEtjcINjG4lhkdCF2ot1h")
+        .is_none_or(|s| s != METRICS_TOKEN.get().unwrap())
     {
         return Err(StatusCode::UNAUTHORIZED);
     }
