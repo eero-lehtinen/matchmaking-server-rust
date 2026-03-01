@@ -1,16 +1,4 @@
-## Init with Dokku
-
-```sh
-## Init
-git remote add prod dokku@94.177.9.119:gaming-gamers-matchmaking
-git remote add staging dokku@94.177.9.119:gaming-gamers-matchmaking-staging
-```
-
-## Deploy to Dokku
-
-```sh
-git push staging master
-```
+# Matchmaking Server
 
 ## Run
 
@@ -31,4 +19,4 @@ sudo apt install coturn
 sudo systemctl start coturn
 ```
 
-Actually I use the server in `stun-only` mode, because I don't want use TURN.
+I use the server in `stun-only` mode, because I don't want use TURN.
