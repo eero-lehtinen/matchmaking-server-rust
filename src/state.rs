@@ -46,12 +46,15 @@ impl MyState {
         }
     }
 
-    pub fn get_game_mut_by_join_token(&self, token: &str) -> Option<RefMut<String, Game>> {
+    pub fn get_game_mut_by_join_token<'a>(
+        &'a self,
+        token: &str,
+    ) -> Option<RefMut<'a, String, Game>> {
         let game_id = self.token_to_game.get(token)?;
         self.get_game_mut(&game_id)
     }
 
-    pub fn get_game_mut(&self, game_id: &str) -> Option<RefMut<String, Game>> {
+    pub fn get_game_mut<'a>(&'a self, game_id: &str) -> Option<RefMut<'a, String, Game>> {
         self.games
             .get_mut(game_id)
             .filter(|game| game.updated.elapsed() <= GAME_STALE)
